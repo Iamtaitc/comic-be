@@ -1,8 +1,8 @@
 // src/crawler/Enhanced-crawler-worker.js
 const { parentPort, workerData } = require("worker_threads");
 const mongoose = require("mongoose");
-const config = require("../../config");
-const EnhancedCrawlerService = require("../services/crawler");
+const config = require("../../../config");
+const EnhancedCrawlerService = require("../crawler");
 
 let isRunning = false;
 let scheduledTask = null;

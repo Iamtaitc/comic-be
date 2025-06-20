@@ -36,13 +36,12 @@ class HourlyCrawlerOrchestrator {
     };
 
     // Initialize Redis connection
-    this.redis = new Redis({
-      host: process.env.REDIS_HOST || "localhost",
-      port: process.env.REDIS_PORT || 6379,
+    this.redis = redisClient || new Redis(redisUrl, {
       retryDelayOnFailover: 100,
       maxRetriesPerRequest: 3,
-      lazyConnect: true,
+      lazyConnect: true
     });
+    
 
     // Initialize components
     this.stateManager = new StateManager(this.redis);

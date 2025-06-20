@@ -24,13 +24,12 @@ class OptimizedStoryProcessor {
     this.STORY_BATCH_SIZE = STORY_BATCH_SIZE;
     this.CHAPTER_BATCH_SIZE = CHAPTER_BATCH_SIZE;
 
-    this.redis = new Redis({
-      host: process.env.REDIS_HOST || "localhost",
-      port: process.env.REDIS_PORT || 6379,
+    this.redis = redisClient || new Redis(redisUrl, {
       retryDelayOnFailover: 100,
       maxRetriesPerRequest: 3,
-      lazyConnect: true,
+      lazyConnect: true
     });
+    
 
     // Rate detection và processing components
     this.rateDetector = new ApiRateDetector({

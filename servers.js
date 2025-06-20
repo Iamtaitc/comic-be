@@ -6,7 +6,7 @@ const { connectDatabase } = require("./src/db/connect.mongo.js");
 const { Worker } = require("worker_threads");
 const path = require("path");
 const mongoose = require("mongoose");
-
+require('dotenv').config();
 // --- Enhanced Crawler Config ---
 const PORT = config.port || 3000;
 const listTypes = ["dang-phat-hanh", "truyen-moi", "hoan-thanh", "sap-ra-mat"];
@@ -14,7 +14,7 @@ const listTypes = ["dang-phat-hanh", "truyen-moi", "hoan-thanh", "sap-ra-mat"];
 // ✅ FIX: Updated path to correct worker file
 const workerPath = path.join(
   __dirname,
-  "src/crawler/enhanced-crawler-worker.js"
+  "src/services/crawler/Enhanced-crawler-worker.js"
 );
 
 // --- HTTP Server ---

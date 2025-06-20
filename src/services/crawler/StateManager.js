@@ -1,24 +1,24 @@
 // src/services/crawler/StateManager.js
 const Redis = require("ioredis");
 const logger = require("../../utils/logger");
-const { 
-  REDIS_STATE_PREFIX, 
-  REDIS_PROGRESS_PREFIX 
+const {
+  REDIS_STATE_PREFIX,
+  REDIS_PROGRESS_PREFIX,
 } = require("./CrawlerConfig");
 
 class StateManager {
   constructor(redisClient) {
-    this.redis = redisClient || new Redis({
-      host: process.env.REDIS_HOST || "localhost",
-      port: process.env.REDIS_PORT || 6379,
-      retryDelayOnFailover: 100,
-      maxRetriesPerRequest: 3,
-      lazyConnect: true
-    });
-    
+    this.redis =
+      redisClient ||
+      new Redis(process.env.REDIS_URL || "redis://comic_redis:6379", {
+        retryDelayOnFailover: 100,
+        maxRetriesPerRequest: 3,
+        lazyConnect: true,
+      });
+
     this.STATE_KEY_PREFIX = REDIS_STATE_PREFIX;
     this.PROGRESS_KEY_PREFIX = REDIS_PROGRESS_PREFIX;
-    
+
     // Connect to Redis
     this.initializeRedis();
   }
@@ -39,23 +39,33 @@ class StateManager {
   /**
    * 💾 Lưu trạng thái crawler cho từng listType
    */
-  async saveListProgress(listType, page, totalProcessed = 0, additionalData = {}) {
+  async saveListProgress(
+    listType,
+    page,
+    totalProcessed = 0,
+    additionalData = {}
+  ) {
     try {
       const key = `${this.PROGRESS_KEY_PREFIX}${listType}`;
       const state = {
         currentPage: page,
         totalProcessed,
         lastUpdated: new Date().toISOString(),
-        status: 'running',
-        ...additionalData
+        status: "running",
+        ...additionalData,
       };
-      
+
       await this.redis.setex(key, 7 * 24 * 3600, JSON.stringify(state)); // 7 days TTL
-      logger.debug(`💾 Saved progress for ${listType}: page ${page}, processed ${totalProcessed}`);
-      
+      logger.debug(
+        `💾 Saved progress for ${listType}: page ${page}, processed ${totalProcessed}`
+      );
+
       return true;
     } catch (error) {
-      logger.error(`❌ Failed to save progress for ${listType}:`, error.message);
+      logger.error(
+        `❌ Failed to save progress for ${listType}:`,
+        error.message
+      );
       return false;
     }
   }
@@ -67,33 +77,32 @@ class StateManager {
     try {
       const key = `${this.PROGRESS_KEY_PREFIX}${listType}`;
       const stateJson = await this.redis.get(key);
-      
+
       if (stateJson) {
         const state = JSON.parse(stateJson);
         logger.info(`📂 Resumed ${listType} from page ${state.currentPage}`);
         return state;
       }
-      
+
       // Default state nếu chưa có
       const defaultState = {
         currentPage: 1,
         totalProcessed: 0,
         lastUpdated: new Date().toISOString(),
-        status: 'new'
+        status: "new",
       };
-      
+
       logger.info(`🆕 Starting fresh for ${listType}`);
       return defaultState;
-      
     } catch (error) {
       logger.error(`❌ Failed to get progress for ${listType}:`, error.message);
-      
+
       // Return default state on error
       return {
         currentPage: 1,
         totalProcessed: 0,
         lastUpdated: new Date().toISOString(),
-        status: 'error'
+        status: "error",
       };
     }
   }
@@ -105,15 +114,15 @@ class StateManager {
     try {
       const key = `${this.PROGRESS_KEY_PREFIX}${listType}`;
       const state = {
-        status: 'completed',
+        status: "completed",
         completedAt: new Date().toISOString(),
         finalStats: stats,
-        lastUpdated: new Date().toISOString()
+        lastUpdated: new Date().toISOString(),
       };
-      
+
       await this.redis.setex(key, 24 * 3600, JSON.stringify(state)); // 1 day TTL
       logger.info(`🏁 Marked ${listType} as completed`);
-      
+
       return true;
     } catch (error) {
       logger.error(`❌ Failed to mark ${listType} completed:`, error.message);
@@ -134,12 +143,18 @@ class StateManager {
         stack: error.stack,
         context,
         timestamp: new Date().toISOString(),
-        errorType: this.classifyError(error)
+        errorType: this.classifyError(error),
       };
-      
-      await this.redis.setex(errorKey, 7 * 24 * 3600, JSON.stringify(errorData)); // 7 days TTL
-      logger.warn(`⚠️ Logged error for ${listType} page ${page}: ${error.message}`);
-      
+
+      await this.redis.setex(
+        errorKey,
+        7 * 24 * 3600,
+        JSON.stringify(errorData)
+      ); // 7 days TTL
+      logger.warn(
+        `⚠️ Logged error for ${listType} page ${page}: ${error.message}`
+      );
+
       return true;
     } catch (redisError) {
       logger.error(`❌ Failed to log error:`, redisError.message);
@@ -154,10 +169,10 @@ class StateManager {
     try {
       const pattern = `crawler:errors:${listType}:*`;
       const keys = await this.redis.keys(pattern);
-      
+
       const failedPages = new Set();
       const errors = [];
-      
+
       for (const key of keys) {
         const errorDataJson = await this.redis.get(key);
         if (errorDataJson) {
@@ -166,17 +181,19 @@ class StateManager {
           errors.push(errorData);
         }
       }
-      
+
       logger.info(`🔄 Found ${failedPages.size} failed pages for ${listType}`);
-      
+
       return {
         pages: Array.from(failedPages),
         errors,
-        count: failedPages.size
+        count: failedPages.size,
       };
-      
     } catch (error) {
-      logger.error(`❌ Failed to get failed pages for ${listType}:`, error.message);
+      logger.error(
+        `❌ Failed to get failed pages for ${listType}:`,
+        error.message
+      );
       return { pages: [], errors: [], count: 0 };
     }
   }
@@ -190,12 +207,12 @@ class StateManager {
       const sessionData = {
         sessionId,
         stats,
-        savedAt: new Date().toISOString()
+        savedAt: new Date().toISOString(),
       };
-      
+
       await this.redis.setex(key, 3 * 24 * 3600, JSON.stringify(sessionData)); // 3 days TTL
       logger.debug(`📊 Saved session stats for ${sessionId}`);
-      
+
       return true;
     } catch (error) {
       logger.error(`❌ Failed to save session stats:`, error.message);
@@ -210,11 +227,11 @@ class StateManager {
     try {
       const key = `crawler:session:${sessionId}`;
       const sessionDataJson = await this.redis.get(key);
-      
+
       if (sessionDataJson) {
         return JSON.parse(sessionDataJson);
       }
-      
+
       return null;
     } catch (error) {
       logger.error(`❌ Failed to get session stats:`, error.message);
@@ -229,21 +246,23 @@ class StateManager {
     try {
       const progressKey = `${this.PROGRESS_KEY_PREFIX}${listType}`;
       const errorPattern = `crawler:errors:${listType}:*`;
-      
+
       // Delete progress
       await this.redis.del(progressKey);
-      
+
       // Delete errors
       const errorKeys = await this.redis.keys(errorPattern);
       if (errorKeys.length > 0) {
         await this.redis.del(...errorKeys);
       }
-      
+
       logger.info(`🔄 Reset progress for ${listType}`);
       return true;
-      
     } catch (error) {
-      logger.error(`❌ Failed to reset progress for ${listType}:`, error.message);
+      logger.error(
+        `❌ Failed to reset progress for ${listType}:`,
+        error.message
+      );
       return false;
     }
   }
@@ -255,20 +274,19 @@ class StateManager {
     try {
       const pattern = `${this.PROGRESS_KEY_PREFIX}*`;
       const keys = await this.redis.keys(pattern);
-      
+
       const status = {};
-      
+
       for (const key of keys) {
-        const listType = key.replace(this.PROGRESS_KEY_PREFIX, '');
+        const listType = key.replace(this.PROGRESS_KEY_PREFIX, "");
         const stateJson = await this.redis.get(key);
-        
+
         if (stateJson) {
           status[listType] = JSON.parse(stateJson);
         }
       }
-      
+
       return status;
-      
     } catch (error) {
       logger.error(`❌ Failed to get all lists status:`, error.message);
       return {};
@@ -281,35 +299,35 @@ class StateManager {
   async cleanup() {
     try {
       const patterns = [
-        'crawler:errors:*',
-        'crawler:session:*',
-        `${this.PROGRESS_KEY_PREFIX}*`
+        "crawler:errors:*",
+        "crawler:session:*",
+        `${this.PROGRESS_KEY_PREFIX}*`,
       ];
-      
+
       let totalCleaned = 0;
-      
+
       for (const pattern of patterns) {
         const keys = await this.redis.keys(pattern);
-        
+
         // Filter keys older than retention period
         const expiredKeys = [];
         for (const key of keys) {
           const ttl = await this.redis.ttl(key);
           // If TTL is -1 (no expiry) or very old, mark for cleanup
-          if (ttl === -1 || ttl > 30 * 24 * 3600) { // Older than 30 days
+          if (ttl === -1 || ttl > 30 * 24 * 3600) {
+            // Older than 30 days
             expiredKeys.push(key);
           }
         }
-        
+
         if (expiredKeys.length > 0) {
           await this.redis.del(...expiredKeys);
           totalCleaned += expiredKeys.length;
         }
       }
-      
+
       logger.info(`🧹 Cleaned up ${totalCleaned} old state keys`);
       return totalCleaned;
-      
     } catch (error) {
       logger.error(`❌ Cleanup failed:`, error.message);
       return 0;
@@ -324,18 +342,17 @@ class StateManager {
       const start = Date.now();
       await this.redis.ping();
       const responseTime = Date.now() - start;
-      
+
       return {
         healthy: true,
         responseTime,
-        connected: true
+        connected: true,
       };
-      
     } catch (error) {
       return {
         healthy: false,
         error: error.message,
-        connected: false
+        connected: false,
       };
     }
   }
@@ -344,13 +361,13 @@ class StateManager {
    * 🔍 Classify error type
    */
   classifyError(error) {
-    if (error.response?.status === 429) return 'RATE_LIMIT';
-    if (error.code === 'ECONNABORTED') return 'TIMEOUT';
-    if (error.code === 'ENOTFOUND') return 'DNS_ERROR';
-    if (error.code === 'ECONNREFUSED') return 'CONNECTION_REFUSED';
-    if (error.message?.includes('duplicate')) return 'DUPLICATE_KEY';
-    if (error.message?.includes('timeout')) return 'TIMEOUT';
-    return 'UNKNOWN';
+    if (error.response?.status === 429) return "RATE_LIMIT";
+    if (error.code === "ECONNABORTED") return "TIMEOUT";
+    if (error.code === "ENOTFOUND") return "DNS_ERROR";
+    if (error.code === "ECONNREFUSED") return "CONNECTION_REFUSED";
+    if (error.message?.includes("duplicate")) return "DUPLICATE_KEY";
+    if (error.message?.includes("timeout")) return "TIMEOUT";
+    return "UNKNOWN";
   }
 
   /**
@@ -358,51 +375,58 @@ class StateManager {
    */
   async getErrorStats(listType = null, timeWindowHours = 24) {
     try {
-      const pattern = listType ? `crawler:errors:${listType}:*` : 'crawler:errors:*';
+      const pattern = listType
+        ? `crawler:errors:${listType}:*`
+        : "crawler:errors:*";
       const keys = await this.redis.keys(pattern);
-      
-      const cutoffTime = new Date(Date.now() - timeWindowHours * 60 * 60 * 1000);
+
+      const cutoffTime = new Date(
+        Date.now() - timeWindowHours * 60 * 60 * 1000
+      );
       const errorStats = {
         total: 0,
         byType: {},
         byListType: {},
-        recent: []
+        recent: [],
       };
-      
+
       for (const key of keys) {
         const errorDataJson = await this.redis.get(key);
         if (errorDataJson) {
           const errorData = JSON.parse(errorDataJson);
           const errorTime = new Date(errorData.timestamp);
-          
+
           if (errorTime > cutoffTime) {
             errorStats.total++;
-            
+
             // Count by error type
-            const errorType = errorData.errorType || 'UNKNOWN';
-            errorStats.byType[errorType] = (errorStats.byType[errorType] || 0) + 1;
-            
+            const errorType = errorData.errorType || "UNKNOWN";
+            errorStats.byType[errorType] =
+              (errorStats.byType[errorType] || 0) + 1;
+
             // Count by list type
-            errorStats.byListType[errorData.listType] = (errorStats.byListType[errorData.listType] || 0) + 1;
-            
+            errorStats.byListType[errorData.listType] =
+              (errorStats.byListType[errorData.listType] || 0) + 1;
+
             // Add to recent errors
             errorStats.recent.push({
               listType: errorData.listType,
               page: errorData.page,
               errorType,
               message: errorData.error,
-              timestamp: errorData.timestamp
+              timestamp: errorData.timestamp,
             });
           }
         }
       }
-      
+
       // Sort recent errors by timestamp
-      errorStats.recent.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      errorStats.recent.sort(
+        (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
+      );
       errorStats.recent = errorStats.recent.slice(0, 50); // Keep last 50
-      
+
       return errorStats;
-      
     } catch (error) {
       logger.error(`❌ Failed to get error stats:`, error.message);
       return { total: 0, byType: {}, byListType: {}, recent: [] };

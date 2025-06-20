@@ -1,0 +1,222 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  comic_mongo:
+    image: mongo:7
+    container_name: comic_mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: comic_database
+      CRAWLER_MAX_DURATION: 129600000  
+      CRAWLER_MAX_PAGES_PER_LIST: 10
+      # Optional: Add authentication
+      # MONGO_INITDB_ROOT_USERNAME: admin
+      # MONGO_INITDB_ROOT_PASSWORD: password123
+    volumes:
+      - comic_mongo_data:/data/db
+      - comic_mongo_config:/data/configdb
+    networks:
+      - comic_network
+    # Improved logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Redis Cache
+  comic_redis:
+    image: redis:7-alpine
+    container_name: comic_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server 
+      --requirepass ComicReader2025!
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    volumes:
+      - comic_redis_data:/data
+    networks:
+      - comic_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "ComicReader2025!", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Comic Reader Application
+  comic_app:
+    build:
+      context: ./be
+      dockerfile: Dockerfile
+      # Build args if needed
+      args:
+        NODE_ENV: development
+    container_name: comic_app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Application settings
+      - NODE_ENV=development
+      - PORT=3000
+      
+      # Database settings
+      - MONGO_URI=mongodb://comic_mongo:27017/comic_database
+      - MONGO_INITDB_DATABASE=comic_database
+      
+      # Redis settings
+      - REDIS_URL=redis://:ComicReader2025!@comic_redis:6379
+      
+      # JWT settings
+      - JWT_SECRET=7e36e69a889727dce72c467467aa7fb61cc4c20d402f7b6d9921067db020c5b8
+      - JWT_EXPIRATION=1d
+      
+      # Crawler settings
+      - CRAWLER_ENABLED=true
+      - CRAWLER_BASE_URL=https://otruyenapi.com/v1/api
+      - CRAWLER_RUN_ON_STARTUP=true
+      - CRAWLER_SCHEDULE=0 */12 * * *
+      - CRAWLER_MAX_CONCURRENT_REQUESTS=3
+      - CRAWLER_REQUEST_DELAY=2000
+      - CRAWLER_MAX_RETRY=3
+      - CRAWLER_USER_AGENT=ComicCrawler/1.0
+      - CRAWLER_WORKER_MODE=true
+      - CRAWLER_WORKER_RESTART_DELAY=60000
+      - CRAWLER_MAX_DURATION=1800000
+      - CRAWLER_MAX_ITEMS=500
+      - CRAWLER_TIMEOUT=30000
+      
+      # Logging settings
+      - LOG_LEVEL=info
+      - LOG_FILE_ENABLED=true
+      - LOG_FILE_PATH=./logs/app.log
+      - LOG_FILE_MAX_SIZE=10m
+      - LOG_FILE_MAX_FILES=5
+      
+      # Performance settings
+      - NODE_OPTIONS=--max-old-space-size=2048
+      
+    volumes:
+      - ./logs:/app/logs
+      - comic_app_uploads:/app/uploads
+      # Optional: Mount source code for development
+      # - .:/app
+      # - /app/node_modules
+    depends_on:
+      comic_mongo:
+        condition: service_healthy
+      comic_redis:
+        condition: service_healthy
+    networks:
+      - comic_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Optional: Monitoring with Portainer
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: comic_portainer
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - comic_network
+    profiles:
+      - monitoring
+
+  # Optional: Log aggregation
+  loki:
+    image: grafana/loki:latest
+    container_name: comic_loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/loki
+    networks:
+      - comic_network
+    profiles:
+      - logging
+
+networks:
+  comic_network:
+    name: comic_network
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  comic_mongo_data:
+    driver: local
+    name: comic_mongo_data
+  comic_mongo_config:
+    driver: local
+    name: comic_mongo_config
+  comic_redis_data:
+    driver: local
+    name: comic_redis_data
+  comic_app_uploads:
+    driver: local
+    name: comic_app_uploads
+  portainer_data:
+    driver: local
+    name: portainer_data
+  loki_data:
+    driver: local
+    name: loki_data
